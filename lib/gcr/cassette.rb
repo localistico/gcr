@@ -1,7 +1,7 @@
 class GCR::Cassette
   VERSION = 2
 
-  attr_reader :reqs, :before_record_request
+  attr_reader :reqs, :before_record_request, :path
 
   # Delete all recorded cassettes.
   #
@@ -152,9 +152,29 @@ class GCR::Cassette
             end
           end
         end
-        raise GCR::NoRecording
+        msg = <<~errmsg.strip
+        No request found matching:
+
+        #{pretty_print_request(req)}
+
+        Requests recorded in cassette #{GCR.cassette.path}:
+
+        errmsg
+
+        GCR.cassette.reqs.each do |recorded_req, _|
+          msg << "\n\n- #{pretty_print_request(recorded_req, indent='  ')}"
+        end
+        raise GCR::NoRecording.new(msg + "\n\n")
       end
     end
+  end
+
+  def pretty_print_request(req, indent='')
+    (
+      "#{req.class_name}\n" +
+      "#{indent}  route=#{req.route}\n" +
+      "#{indent}  body=#{req.body}"
+    )
   end
 
   def stop_playing
