@@ -15,7 +15,8 @@ class GCR::Request
     )
   end
 
-  attr_reader :route, :class_name, :body
+  attr_reader :route, :class_name
+  attr_accessor :body
 
   def initialize(opts)
     @route      = opts["route"]

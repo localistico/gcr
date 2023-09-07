@@ -1,7 +1,7 @@
 class GCR::Cassette
   VERSION = 2
 
-  attr_reader :reqs
+  attr_reader :reqs, :before_record_request
 
   # Delete all recorded cassettes.
   #
@@ -17,10 +17,11 @@ class GCR::Cassette
   # name - The String name of the recording, from which the path is derived.
   #
   # Returns nothing.
-  def initialize(name)
+  def initialize(name, before_record_request: nil)
     @path = File.join(GCR.cassette_dir, "#{name}.json")
     @reqs = []
     FileUtils.mkdir_p(File.dirname(@path))
+    @before_record_request = before_record_request || -> (req) { nil }
   end
 
   # Does this cassette exist?
@@ -92,8 +93,10 @@ class GCR::Cassette
           resp = orig_request_response(*args, return_op: false, **kwargs)
 
           req = GCR::Request.from_proto(*args)
+          resp = GCR::Response.from_proto(resp)
+          GCR.cassette.before_record_request.call(req)
           if GCR.cassette.reqs.none? { |r, _| r == req }
-            GCR.cassette.reqs << [req, GCR::Response.from_proto(resp)]
+            GCR.cassette.reqs << [req, resp]
           end
 
           # then return it
@@ -101,8 +104,10 @@ class GCR::Cassette
         else
           orig_request_response(*args, return_op: return_op, **kwargs).tap do |resp|
             req = GCR::Request.from_proto(*args)
+            resp = GCR::Response.from_proto(resp)
+            GCR.cassette.before_record_request.call(req)
             if GCR.cassette.reqs.none? { |r, _| r == req }
-              GCR.cassette.reqs << [req, GCR::Response.from_proto(resp)]
+              GCR.cassette.reqs << [req, resp]
             end
           end
         end
@@ -125,6 +130,9 @@ class GCR::Cassette
 
       def request_response(*args, return_op: false, **kwargs)
         req = GCR::Request.from_proto(*args)
+
+        GCR.cassette.before_record_request.call(req)  # To make sure the request matches the recorded ones
+
         GCR.cassette.reqs.each do |other_req, resp|
           if req == other_req
 

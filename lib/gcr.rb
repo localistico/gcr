@@ -102,8 +102,8 @@ module GCR
   # provided block. Otherwise, record a cassette with the provided block.
   #
   # Returns nothing.
-  def with_cassette(name, &blk)
-    @cassette = Cassette.new(name)
+  def with_cassette(name, **kwargs, &blk)
+    @cassette = Cassette.new(name, **kwargs)
     if @cassette.exist?
       @cassette.play(&blk)
     else
