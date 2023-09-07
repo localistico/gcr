@@ -88,15 +88,16 @@ class GCR::Cassette
         if return_op
           # capture the operation
           operation = orig_request_response(*args, return_op: return_op, **kwargs)
-
-          # capture the response
-          resp = orig_request_response(*args, return_op: false, **kwargs)
-
-          req = GCR::Request.from_proto(*args)
-          resp = GCR::Response.from_proto(resp)
-          GCR.cassette.before_record_request.call(req)
-          if GCR.cassette.reqs.none? { |r, _| r == req }
-            GCR.cassette.reqs << [req, resp]
+          original_execute = operation.method(:execute)
+          operation.define_singleton_method(:execute) do
+            original_execute.call.tap do |resp|
+              req = GCR::Request.from_proto(*args)
+              resp = GCR::Response.from_proto(resp)
+              GCR.cassette.before_record_request.call(req)
+              if GCR.cassette.reqs.none? { |r, _| r == req }
+                GCR.cassette.reqs << [req, resp]
+              end
+            end
           end
 
           # then return it
