@@ -1,7 +1,7 @@
 class GCR::Cassette
   VERSION = 2
 
-  attr_reader :reqs, :before_record_request, :path
+  attr_reader :reqs, :before_record_request, :path, :dedupe_requests, :start_playback_from
 
   # Delete all recorded cassettes.
   #
@@ -17,11 +17,13 @@ class GCR::Cassette
   # name - The String name of the recording, from which the path is derived.
   #
   # Returns nothing.
-  def initialize(name, before_record_request: nil)
+  def initialize(name, before_record_request: nil, dedupe_requests: true)
     @path = File.join(GCR.cassette_dir, "#{name}.json")
     @reqs = []
     FileUtils.mkdir_p(File.dirname(@path))
     @before_record_request = before_record_request || -> (req) { nil }
+    @dedupe_requests = dedupe_requests
+    @start_playback_from = 0
   end
 
   # Does this cassette exist?
@@ -29,6 +31,10 @@ class GCR::Cassette
   # Returns boolean.
   def exist?
     File.exist?(@path)
+  end
+
+  def dedupe_requests?
+    @dedupe_requests
   end
 
   # Load this cassette.
@@ -43,6 +49,14 @@ class GCR::Cassette
 
     @reqs = data["reqs"].map do |req, resp|
       [GCR::Request.from_hash(req), GCR::Response.from_hash(resp)]
+    end
+
+    if dedupe_requests?
+      @reqs.each_with_index do |req_resp, i|
+        if @reqs[i+1..].any? { |other_req_resp| other_req_resp[0] == req_resp[0] }
+          raise "GCR cassette contains duplicate requests, cannot be replayed with dedupe_requests as true"
+        end
+      end
     end
   end
 
@@ -94,7 +108,7 @@ class GCR::Cassette
               req = GCR::Request.from_proto(*args)
               resp = GCR::Response.from_proto(resp)
               GCR.cassette.before_record_request.call(req)
-              if GCR.cassette.reqs.none? { |r, _| r == req }
+              if !GCR.cassette.dedupe_requests? || GCR.cassette.reqs.none? { |r, _| r == req }
                 GCR.cassette.reqs << [req, resp]
               end
             end
@@ -107,7 +121,7 @@ class GCR::Cassette
             req = GCR::Request.from_proto(*args)
             resp = GCR::Response.from_proto(resp)
             GCR.cassette.before_record_request.call(req)
-            if GCR.cassette.reqs.none? { |r, _| r == req }
+            if !GCR.cassette.dedupe_requests? || GCR.cassette.reqs.none? { |r, _| r == req }
               GCR.cassette.reqs << [req, resp]
             end
           end
@@ -123,7 +137,45 @@ class GCR::Cassette
     save
   end
 
+  def get_response!(req)
+    before_record_request.call(req)  # To make sure the request matches the recorded ones
+
+    reqs[start_playback_from..].each.with_index(start_playback_from + 1) do |req_resp, next_start_from|
+      recorded_req, recorded_resp = req_resp
+      if req == recorded_req
+        if !dedupe_requests?
+          # If there can be duplicate requests, need to keep track of the
+          # position in the cassette, so that subsequent requests are
+          # replayed with their subsequent responses, otherwise the first
+          # request will be played back all the time.
+          @start_playback_from = next_start_from
+        end
+
+        return recorded_resp
+      end
+    end
+    position_msg = start_playback_from > 0 ? "after position #{start_playback_from} " : ""
+
+    msg = <<~errmsg.strip
+    No request found #{position_msg} matching
+
+    #{pretty_print_request(req)}
+
+    Requests recorded in cassette #{path}:
+
+    errmsg
+
+    reqs.each_with_index do |req_resp, i|
+      if start_playback_from > 0 and start_playback_from == i
+        msg << "\n\n** playing back from here"
+      end
+      msg << "\n\n- #{pretty_print_request(req_resp[0], indent='  ')}"
+    end
+    raise GCR::NoRecording.new(msg + "\n\n")
+  end
+
   def start_playing
+    @start_playback_from = 0
     load
 
     GCR.stub.class.class_eval do
@@ -131,41 +183,22 @@ class GCR::Cassette
 
       def request_response(*args, return_op: false, **kwargs)
         req = GCR::Request.from_proto(*args)
+        resp = GCR.cassette.get_response!(req)
 
-        GCR.cassette.before_record_request.call(req)  # To make sure the request matches the recorded ones
+        # check if our request wants an operation returned rather than the response
+        if return_op
+          # if so, collect the original operation
+          operation = orig_request_response(*args, return_op: return_op, **kwargs)
 
-        GCR.cassette.reqs.each do |other_req, resp|
-          if req == other_req
+          # hack the execute method to return the response we recorded
+          operation.define_singleton_method(:execute) { return resp.to_proto }
 
-            # check if our request wants an operation returned rather than the response
-            if return_op
-              # if so, collect the original operation
-              operation = orig_request_response(*args, return_op: return_op, **kwargs)
-
-              # hack the execute method to return the response we recorded
-              operation.define_singleton_method(:execute) { return resp.to_proto }
-
-              # then return it
-              return operation
-            else
-              # otherwise just return the response
-              return resp.to_proto
-            end
-          end
+          # then return it
+          return operation
+        else
+          # otherwise just return the response
+          return resp.to_proto
         end
-        msg = <<~errmsg.strip
-        No request found matching:
-
-        #{pretty_print_request(req)}
-
-        Requests recorded in cassette #{GCR.cassette.path}:
-
-        errmsg
-
-        GCR.cassette.reqs.each do |recorded_req, _|
-          msg << "\n\n- #{pretty_print_request(recorded_req, indent='  ')}"
-        end
-        raise GCR::NoRecording.new(msg + "\n\n")
       end
     end
   end
