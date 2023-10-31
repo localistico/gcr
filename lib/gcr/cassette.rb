@@ -95,7 +95,11 @@ class GCR::Cassette
   end
 
   def start_recording
-    GCR.stub.class.class_eval do
+    GCR.stubs.each { |stub| start_recording_for_stub(stub) }
+  end
+
+  def start_recording_for_stub(stub)
+    stub.class.class_eval do
       alias_method :orig_request_response, :request_response
 
       def request_response(*args, return_op: false, **kwargs)
@@ -131,10 +135,14 @@ class GCR::Cassette
   end
 
   def stop_recording
-    GCR.stub.class.class_eval do
+    GCR.stubs.each { |stub| stop_recording_for_stub(stub) }
+    save
+  end
+
+  def stop_recording_for_stub(stub)
+    stub.class.class_eval do
       alias_method :request_response, :orig_request_response
     end
-    save
   end
 
   def get_response!(req)
@@ -178,7 +186,11 @@ class GCR::Cassette
     @start_playback_from = 0
     load
 
-    GCR.stub.class.class_eval do
+    GCR.stubs.each { |stub| start_playing_for_stub(stub) }
+  end
+
+  def start_playing_for_stub(stub)
+    stub.class.class_eval do
       alias_method :orig_request_response, :request_response
 
       def request_response(*args, return_op: false, **kwargs)
@@ -212,7 +224,11 @@ class GCR::Cassette
   end
 
   def stop_playing
-    GCR.stub.class.class_eval do
+    GCR.stubs.each { |stub| stop_playing_for_stub(stub) }
+  end
+
+  def stop_playing_for_stub(stub)
+    stub.class.class_eval do
       alias_method :request_response, :orig_request_response
     end
   end

@@ -66,14 +66,28 @@ module GCR
   # Returns nothing.
   def stub=(stub)
     raise RunningError, "cannot configure GCR within #with_cassette block" if @running
-    @stub = stub
+    @stubs = [stub]
+  end
+
+  def stubs=(stubs)
+    raise RunningError, "cannot configure GCR within #with_cassette block" if @running
+    raise ConfigError, "no stub configured" unless stubs&.size&.positive?
+    @stubs = stubs
   end
 
   # The stub that is being mocked.
   #
   # Returns a A GRPC::ClientStub instance. Raises ConfigError if not configured.
   def stub
-    @stub || (raise ConfigError, "no stub configured")
+    raise ConfigError, "no stub configured" unless @stubs
+
+    raise RunningError, "multiple stubs in use, use #stubs method" if @stubs.size > 1
+    @stubs[0]
+  end
+
+  def stubs
+    raise ConfigError, "no stubs configured" unless @stubs
+    @stubs
   end
 
   def insert(name)
