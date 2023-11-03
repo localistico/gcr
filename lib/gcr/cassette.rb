@@ -24,6 +24,8 @@ class GCR::Cassette
     @before_record_request = before_record_request || -> (req) { nil }
     @dedupe_requests = dedupe_requests
     @start_playback_from = 0
+    @playing = false
+    @recording = false
   end
 
   # Does this cassette exist?
@@ -31,6 +33,14 @@ class GCR::Cassette
   # Returns boolean.
   def exist?
     File.exist?(@path)
+  end
+
+  def playing?
+    !!@playing
+  end
+
+  def recording?
+    !!@recording
   end
 
   def dedupe_requests?
@@ -95,6 +105,7 @@ class GCR::Cassette
   end
 
   def start_recording
+    @recording = true
     GCR.stubs.each { |stub| start_recording_for_stub(stub) }
   end
 
@@ -136,6 +147,7 @@ class GCR::Cassette
 
   def stop_recording
     GCR.stubs.each { |stub| stop_recording_for_stub(stub) }
+    @recording = false
     save
   end
 
@@ -183,6 +195,7 @@ class GCR::Cassette
   end
 
   def start_playing
+    @playing = true
     @start_playback_from = 0
     load
 
@@ -225,6 +238,7 @@ class GCR::Cassette
 
   def stop_playing
     GCR.stubs.each { |stub| stop_playing_for_stub(stub) }
+    @playing = false
   end
 
   def stop_playing_for_stub(stub)
